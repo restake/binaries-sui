@@ -1,0 +1,103 @@
+---
+name: "Build Sui release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Specify the version"
+        required: true
+        default: "mainnet-v1.15.1"
+  pull_request:
+    branches:
+      - "master"
+
+permissions:
+  contents: "write"
+
+env:
+  SUI_VERSION: "${{ inputs.version || 'mainnet-v1.15.1' }}"
+
+jobs:
+  build:
+    name: "Build"
+    runs-on: "ubuntu-latest-l"
+    steps:
+      - id: "setup-rust"
+        name: "Set up Rust toolchain"
+        uses: "dtolnay/rust-toolchain@v1"
+        with:
+          toolchain: "stable"
+
+      - id: "setup-dependencies"
+        name: "Install required system packages"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libudev-dev pkg-config zlib1g-dev llvm clang cmake make libprotobuf-dev protobuf-compiler
+
+      - id: "clone"
+        name: "Clone Sui source"
+        uses: "actions/checkout@v4"
+        with:
+          repository: "MystenLabs/sui"
+          fetch-tags: true
+          path: "sui"
+          ref: "refs/tags/${{ env.SUI_VERSION }}"
+          submodules: true
+
+      - id: "cache"
+        name: "Cache Cargo dependencies"
+        uses: "actions/cache@v3"
+        with:
+          path: "~/.cargo"
+          key: "cargo-${{ hashFiles('sui/Cargo.lock') }}"
+
+      - id: "build"
+        name: "Build Sui binary"
+        run: |
+          set -euo pipefail
+
+          cd sui
+          export CARGO_BUILD_RUSTFLAGS="-C target-cpu=znver3"
+          cargo build --release --bin sui-node --bin sui
+
+          set -x
+          test -f target/release/sui
+          test -f target/release/sui-node
+
+      - id: "upload-artifact"
+        name: "Save binary to workspace"
+        uses: "actions/upload-artifact@v3"
+        with:
+          name: "sui"
+          path: "sui/target/release/sui*"
+          if-no-files-found: "error"
+          retention-days: 1
+
+  publish:
+    name: "Publish"
+    needs: "build"
+    runs-on: "ubuntu-latest"
+    if: "${{ github.event_name == 'workflow_dispatch' }}"
+    steps:
+      - id: "download-artifact"
+        name: "Download binary from workspace"
+        uses: "actions/download-artifact@v3"
+        with:
+          name: "sui"
+          path: "binaries"
+
+      - id: "publish"
+        name: "Publish Github release"
+        uses: "softprops/action-gh-release@v1"
+        with:
+          body: |
+            For changes, see here: https://github.com/MystenLabs/sui/releases/tag/${{ env.SUI_VERSION }}
+          files: |
+            binaries/sui
+            binaries/sui-node
+          tag_name: "${{ env.SUI_VERSION }}"
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          generate_release_notes: true
