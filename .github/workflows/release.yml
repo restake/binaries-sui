@@ -58,12 +58,16 @@ jobs:
           set -euo pipefail
 
           cd sui
+          mkdir bin
+
+          export CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu"
           export CARGO_BUILD_RUSTFLAGS="-C target-cpu=znver3"
+
           cargo build --release --bin sui-node --bin sui
 
           set -x
-          test -f target/release/sui
-          test -f target/release/sui-node
+          mv -v "target/${CARGO_BUILD_TARGET}/release/sui" bin/
+          mv -v "target/${CARGO_BUILD_TARGET}/release/sui-node" bin/
 
       - id: "upload-artifact"
         name: "Save binary to workspace"
@@ -71,8 +75,8 @@ jobs:
         with:
           name: "sui"
           path: |
-            sui/target/release/sui
-            sui/target/release/sui-node
+            sui/bin/sui
+            sui/bin/sui-node
           if-no-files-found: "error"
           retention-days: 1
 
